@@ -1,0 +1,27 @@
+[project]
+name = "mev-commit-timescaldb"
+version = "0.1.0"
+description = "Add your description here"
+authors = [{ name = "Evan K", email = "ekcopersonal@gmail.com" }]
+dependencies = [
+    "polars>=1.12.0",
+    "psycopg>=3.2.3",
+    "python-dotenv>=1.0.1",
+    "hypermanager>=0.1.9",
+]
+readme = "README.md"
+requires-python = ">= 3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = []
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mev_commit_timescaldb"]
