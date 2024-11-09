@@ -2,14 +2,13 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
-from datetime import datetime
 import polars as pl
 from hypermanager.manager import HyperManager
 from hypermanager.protocols.mev_commit import mev_commit_config
 from dotenv import load_dotenv
 
-from db import create_connection, write_events_to_timescale, get_max_block_number
-from pipe import fetch_event_for_config  # your existing hypersync.py file
+from pipeline.db import create_connection, write_events_to_timescale, get_max_block_number
+from pipeline.queries import fetch_event_for_config
 
 # Configure logging
 logging.basicConfig(
@@ -62,7 +61,7 @@ async def process_event_config(conn, manager, config, start_block: int = 0):
         df: pl.DataFrame = await fetch_event_for_config(
             manager=manager,
             base_event_config=config,
-            block_number=current_block
+            block_number=current_block+1
         )
 
         if df is not None and not df.is_empty():
