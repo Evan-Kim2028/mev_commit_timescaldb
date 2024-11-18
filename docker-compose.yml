@@ -1,4 +1,4 @@
-version: '3.8' # Specify the Docker Compose version
+version: '3.8'
 
 services:
   timescaledb:
@@ -12,7 +12,6 @@ services:
       - "${DB_PORT}:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
-      - ./sql:/docker-entrypoint-initdb.d
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
       interval: 10s
@@ -20,6 +19,19 @@ services:
       retries: 5
     env_file:
       - .env
+    restart: unless-stopped
+
+  refresh_scheduler:
+    image: postgres:15-alpine
+    container_name: refresh_scheduler
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    volumes:
+      - ./sql:/scripts
+    environment:
+      - PGPASSWORD=${DB_PASSWORD}
+    entrypoint: [ "/bin/sh", "-c", "for file in /scripts/*.sql; do psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f $file; done" ]
 
   postgrest:
     image: postgrest/postgrest:latest
@@ -33,18 +45,13 @@ services:
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
       PGRST_SERVER_PORT: ${PGRST_SERVER_PORT}
     ports:
-      - "3003:3000" # Host:Container
-
-  refresh_scheduler:
-    image: postgres:15-alpine
-    container_name: refresh_scheduler
-    depends_on:
-      - timescaledb
-    volumes:
-      - ./sql/refresh_scheduler:/scripts
-    environment:
-      - PGPASSWORD=${DB_PASSWORD}
-    entrypoint: [ "/bin/sh", "/scripts/refresh_materialized_views.sh" ]
+      - "3003:3000"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail http://localhost:3000 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   app:
     build:
