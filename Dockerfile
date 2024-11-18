@@ -30,7 +30,7 @@ RUN mkdir -p /app && chmod -R 777 /app
 COPY . .
 
 # Use Rye to create the virtual environment and install dependencies
-RUN rye env create --force && rye sync
+RUN rye sync
 
 # Copy and set permissions for the entrypoint script
 COPY entrypoint.sh /entrypoint.sh
