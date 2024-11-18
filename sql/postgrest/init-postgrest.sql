@@ -14,5 +14,8 @@ $do$;
 -- Grant usage on the api schema to anon
 GRANT USAGE ON SCHEMA api TO anon;
 
--- Grant select on all tables in api schema to anon
+-- Grant select on all EXISTING tables in api schema to anon
+GRANT SELECT ON ALL TABLES IN SCHEMA api TO anon;
+
+-- Grant select on all FUTURE tables in api schema to anon
 ALTER DEFAULT PRIVILEGES IN SCHEMA api GRANT SELECT ON TABLES TO anon;
