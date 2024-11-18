@@ -12,6 +12,7 @@ services:
       - "${DB_PORT}:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
+      - ./init-postgrest.sql:/docker-entrypoint-initdb.d/init-postgrest.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
       interval: 10s
@@ -31,15 +32,12 @@ services:
       - ./sql:/sql
     environment:
       - PGPASSWORD=${DB_PASSWORD}
-    entrypoint: >
-      /bin/sh -c " echo 'Starting continuous execution of .sql files in /sql and subdirectories'; while true; do
-        find /sql -type f -name '*.sql' -print | while read file; do
-          echo \"Running $file\"; 
-          psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f \"$file\" || echo \"Failed to execute $file\";
-        done;
-        echo 'Sleeping for 60 seconds before the next run';
-        sleep 60;
-      done"
+      - DB_HOST=timescaledb
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_NAME=${DB_NAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+    entrypoint: [ "/sql/refresh_scheduler/refresh_materialized_views.sh" ]
 
   postgrest:
     image: postgrest/postgrest:latest
@@ -48,10 +46,11 @@ services:
       timescaledb:
         condition: service_healthy
     environment:
-      PGRST_DB_URI: ${PGRST_DB_URI}
-      PGRST_DB_SCHEMA: ${PGRST_DB_SCHEMA}
-      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
-      PGRST_SERVER_PORT: ${PGRST_SERVER_PORT}
+      - PGRST_DB_URI=${PGRST_DB_URI}
+      - PGRST_DB_SCHEMA=${PGRST_DB_SCHEMA}
+      - PGRST_DB_ANON_ROLE=${PGRST_DB_ANON_ROLE}
+      - PGRST_SERVER_PORT=${PGRST_SERVER_PORT}
+      - PGRST_DB_MAX_ROWS=1000
     ports:
       - "3003:3000"
     healthcheck:

@@ -17,23 +17,20 @@ DATABASE_URI="postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
 while true; do
   echo "$(date): Ensuring materialized views exist..."
 
-  # Create materialized views if they don't exist by sourcing the SQL files
-  psql "$DATABASE_URI" -v ON_ERROR_STOP=1 <<EOF
-DO \$\$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_matviews WHERE matviewname = 'total_preconf_stats' AND schemaname = 'api') THEN
-        \i /scripts/sql/views/total_preconf_stats.sql
-        GRANT SELECT, INSERT, UPDATE, DELETE ON api.total_preconf_stats TO postgres;
-    END IF;
+  # First, execute the view creation files if views don't exist
+  if ! psql "$DATABASE_URI" -t -c "SELECT TRUE FROM pg_matviews WHERE matviewname = 'total_preconf_stats' AND schemaname = 'api';" | grep -q t; then
+    echo "Creating total_preconf_stats view..."
+    psql "$DATABASE_URI" -f /sql/views/total_preconf_stats.sql
+    psql "$DATABASE_URI" -c "GRANT SELECT, INSERT, UPDATE, DELETE ON api.total_preconf_stats TO postgres;"
+  fi
 
-    IF NOT EXISTS (SELECT FROM pg_matviews WHERE matviewname = 'preconf_txs' AND schemaname = 'api') THEN
-        \i /scripts/sql/views/preconf_txs.sql
-        GRANT SELECT, INSERT, UPDATE, DELETE ON api.preconf_txs TO postgres;
-    END IF;
-END
-\$\$;
-EOF
+  if ! psql "$DATABASE_URI" -t -c "SELECT TRUE FROM pg_matviews WHERE matviewname = 'preconf_txs' AND schemaname = 'api';" | grep -q t; then
+    echo "Creating preconf_txs view..."
+    psql "$DATABASE_URI" -f /sql/views/preconf_txs.sql
+    psql "$DATABASE_URI" -c "GRANT SELECT, INSERT, UPDATE, DELETE ON api.preconf_txs TO postgres;"
+  fi
 
+  # Then refresh the views
   echo "$(date): Refreshing materialized view 'total_preconf_stats'..."
   if psql "$DATABASE_URI" -c "REFRESH MATERIALIZED VIEW api.total_preconf_stats;"; then
     echo "Refresh 'total_preconf_stats' successful."
