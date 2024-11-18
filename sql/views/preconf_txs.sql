@@ -1,11 +1,12 @@
 -- Create the api schema if it doesn't exist
 CREATE SCHEMA IF NOT EXISTS api;
 
--- Drop the materialized view if it exists to allow updates
+-- Drop the continuous aggregate if it exists to allow updates
 DROP MATERIALIZED VIEW IF EXISTS api.preconf_txs CASCADE;
 
--- Create the materialized view
-CREATE MATERIALIZED VIEW api.preconf_txs AS
+-- Create the continuous aggregate
+CREATE MATERIALIZED VIEW api.preconf_txs
+WITH (timescaledb.continuous) AS
 WITH 
 encrypted_stores AS (
     SELECT commitmentIndex, committer, commitmentDigest 

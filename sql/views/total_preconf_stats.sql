@@ -1,11 +1,12 @@
 -- Create the api schema if it doesn't exist
 CREATE SCHEMA IF NOT EXISTS api;
 
--- Drop the materialized view if it exists to allow updates
+-- Drop the continuous aggregate if it exists to allow updates
 DROP MATERIALIZED VIEW IF EXISTS api.total_preconf_stats CASCADE;
 
--- Create the materialized view
-CREATE MATERIALIZED VIEW api.total_preconf_stats AS
+-- Create the continuous aggregate
+CREATE MATERIALIZED VIEW api.total_preconf_stats
+WITH (timescaledb.continuous) AS
 WITH 
 encrypted_stores AS (
     SELECT commitmentIndex, committer, commitmentDigest 
@@ -66,7 +67,7 @@ commitments_final AS (
 SELECT 
     ROUND(SUM(decayed_bid_eth)::NUMERIC, 4) AS total_decayed_bid_eth,
     COUNT(*) AS total_commitments,
-    COUNT(distinct bidder) as bidder_count,
+    COUNT(DISTINCT bidder) AS bidder_count,
     ROUND(AVG(decayed_bid_eth)::NUMERIC, 4) AS avg_decayed_bid_eth,
     ROUND(MAX(decayed_bid_eth)::NUMERIC, 4) AS max_decayed_bid_eth,
     ROUND(MIN(decayed_bid_eth)::NUMERIC, 4) AS min_decayed_bid_eth
