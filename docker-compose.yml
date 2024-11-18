@@ -31,7 +31,13 @@ services:
       - ./sql:/scripts
     environment:
       - PGPASSWORD=${DB_PASSWORD}
-    entrypoint: [ "/bin/sh", "-c", "for file in /scripts/*.sql; do psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f $file; done" ]
+    entrypoint: >
+      /bin/sh -c " for file in /scripts/*.sql; do
+        if [ -f \"$file\" ]; then
+          echo \"Running $file\"; 
+          psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f \"$file\"; 
+        fi;
+      done"
 
   postgrest:
     image: postgrest/postgrest:latest
