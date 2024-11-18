@@ -28,13 +28,17 @@ services:
       timescaledb:
         condition: service_healthy
     volumes:
-      - ./sql:/scripts
+      - ./sql:/sql
     environment:
       - PGPASSWORD=${DB_PASSWORD}
     entrypoint: >
-      /bin/sh -c " echo 'Looking for .sql files in /sql and subdirectories';  find /sql -type f -name '*.sql' -print | while read file; do
-        echo \"Running $file\"; 
-        psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f \"$file\" || exit 1; 
+      /bin/sh -c " echo 'Starting continuous execution of .sql files in /sql and subdirectories'; while true; do
+        find /sql -type f -name '*.sql' -print | while read file; do
+          echo \"Running $file\"; 
+          psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f \"$file\" || echo \"Failed to execute $file\";
+        done;
+        echo 'Sleeping for 60 seconds before the next run';
+        sleep 60;
       done"
 
   postgrest:
