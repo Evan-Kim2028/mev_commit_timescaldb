@@ -28,8 +28,6 @@ RUN mkdir -p /app && chmod -R 777 /app
 # Copy project files into the container
 COPY . .
 
-# Use Rye to create the virtual environment and install dependencies
-RUN rye env create --force
 RUN rye sync
 
 # Copy and set permissions for the entrypoint script
