@@ -1,3 +1,5 @@
+version: '3.8' # Specify the Docker Compose version
+
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg15
@@ -31,7 +33,7 @@ services:
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
       PGRST_SERVER_PORT: ${PGRST_SERVER_PORT}
     ports:
-      - "3003:3000"
+      - "3003:3000" # Host:Container
 
   refresh_scheduler:
     image: postgres:15-alpine
@@ -43,6 +45,25 @@ services:
     environment:
       - PGPASSWORD=${DB_PASSWORD}
     entrypoint: [ "/bin/sh", "/scripts/refresh_materialized_views.sh" ]
+
+  app:
+    build:
+      context: . # Adjust if Dockerfile is in a different directory
+      dockerfile: Dockerfile # Specify if named differently
+    container_name: app
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=mev_timescaledb
+      - DB_PORT=${DB_PORT}
+      # Add any additional environment variables your Python scripts require
+    volumes:
+      - .:/app # Optional: Mount the current directory
+    restart: unless-stopped # Optional: Ensure the container restarts on failure
 
 volumes:
   timescale_data:
