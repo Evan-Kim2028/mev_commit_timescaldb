@@ -10,6 +10,7 @@ services:
       - "${DB_PORT}:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
       interval: 10s
@@ -17,6 +18,31 @@ services:
       retries: 5
     env_file:
       - .env
+
+  postgrest:
+    image: postgrest/postgrest:latest
+    container_name: postgrest
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://${DB_USER}:${DB_PASSWORD}@mev_timescaledb:5432/${DB_NAME}
+      PGRST_DB_SCHEMA: api
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_SERVER_PORT: 3000
+    ports:
+      - "3000:3000"
+
+  refresh_scheduler:
+    image: postgres:15-alpine
+    container_name: refresh_scheduler
+    depends_on:
+      - timescaledb
+    volumes:
+      - ./sql/refresh_scheduler:/scripts
+    environment:
+      - PGPASSWORD=${DB_PASSWORD}
+    entrypoint: [ "/bin/sh", "/scripts/refresh_materialized_views.sh" ]
 
 volumes:
   timescale_data:
