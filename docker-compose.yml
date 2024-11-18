@@ -31,7 +31,7 @@ services:
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
       PGRST_SERVER_PORT: ${PGRST_SERVER_PORT}
     ports:
-      - "3000:3003"
+      - "3003:3000"
 
   refresh_scheduler:
     image: postgres:15-alpine
