@@ -48,8 +48,8 @@ services:
 
   app:
     build:
-      context: . # Adjust if Dockerfile is in a different directory
-      dockerfile: Dockerfile # Specify if named differently
+      context: .
+      dockerfile: Dockerfile
     container_name: app
     depends_on:
       timescaledb:
@@ -60,10 +60,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_HOST=mev_timescaledb
       - DB_PORT=${DB_PORT}
-      # Add any additional environment variables your Python scripts require
-    volumes:
-      - .:/app # Optional: Mount the current directory
-    restart: unless-stopped # Optional: Ensure the container restarts on failure
+    restart: unless-stopped
 
 volumes:
   timescale_data:

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Activate the virtual environment (ensure Rye creates .venv)
-source .venv/bin/activate
+# Activate the virtual environment
+source /app/.venv/bin/activate
 
 # Function to run Python scripts
 run_scripts() {
