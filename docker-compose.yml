@@ -32,11 +32,9 @@ services:
     environment:
       - PGPASSWORD=${DB_PASSWORD}
     entrypoint: >
-      /bin/sh -c " for file in /scripts/*.sql; do
-        if [ -f \"$file\" ]; then
-          echo \"Running $file\"; 
-          psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f \"$file\"; 
-        fi;
+      /bin/sh -c " echo 'Looking for .sql files in /sql and subdirectories';  find /sql -type f -name '*.sql' -print | while read file; do
+        echo \"Running $file\"; 
+        psql -h timescaledb -U ${DB_USER} -d ${DB_NAME} -f \"$file\" || exit 1; 
       done"
 
   postgrest:
