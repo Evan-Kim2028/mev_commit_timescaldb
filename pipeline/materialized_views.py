@@ -84,22 +84,81 @@ class MaterializedViewManager:
                 cur.execute(
                     "DROP MATERIALIZED VIEW IF EXISTS api.preconf_txs CASCADE;")
 
-                # Your existing view creation query...
+                # Corrected view creation query with single WITH clause
                 query = """
                 CREATE MATERIALIZED VIEW api.preconf_txs 
                 WITH (timescaledb.continuous = false) AS
-                -- Your existing SELECT statement...
+                WITH 
+                    encrypted_stores AS (
+                        SELECT commitmentIndex, committer, commitmentDigest 
+                        FROM public.unopenedcommitmentstored
+                    ),
+                    commit_stores AS (
+                        SELECT * FROM public.openedcommitmentstored
+                    ),
+                    commits_processed AS (
+                        SELECT commitmentIndex, isSlash 
+                        FROM public.commitmentprocessed
+                    ),
+                    l1_transactions AS (
+                        SELECT * FROM public.l1transactions
+                    ),
+                    commitments_intermediate AS (
+                        SELECT 
+                            es.commitmentIndex,
+                            es.committer,
+                            es.commitmentDigest,
+                            '0x' || cs.txnHash AS txnHash,
+                            cp.isSlash,
+                            cs.blocknumber AS inc_block_number,
+                            l1.hash,
+                            l1.timestamp,
+                            l1.extra_data AS builder_graffiti,
+                            cs.bidder,
+                            cs.bid,
+                            cs.decayStartTimeStamp,
+                            cs.decayEndTimeStamp,
+                            cs.dispatchTimestamp
+                        FROM encrypted_stores es
+                        INNER JOIN commit_stores cs ON es.commitmentIndex = cs.commitmentIndex
+                        INNER JOIN commits_processed cp ON es.commitmentIndex = cp.commitmentIndex
+                        INNER JOIN l1_transactions l1 ON '0x' || cs.txnHash = l1.hash
+                    ),
+                    commitments_final AS (
+                        SELECT 
+                            *,
+                            CAST(bid AS NUMERIC) / POWER(10, 18) AS bid_eth,
+                            TO_TIMESTAMP(timestamp / 1000) AS date,
+                            GREATEST(
+                                CASE 
+                                    WHEN (decayEndTimeStamp - dispatchTimestamp) = 0 THEN 0
+                                    ELSE (decayEndTimeStamp - decayStartTimeStamp)::FLOAT / (decayEndTimeStamp - dispatchTimestamp)
+                                END, 
+                                0
+                            ) AS decay_multiplier,
+                            GREATEST(
+                                CASE 
+                                    WHEN (decayEndTimeStamp - dispatchTimestamp) = 0 THEN 0
+                                    ELSE (decayEndTimeStamp - decayStartTimeStamp)::FLOAT / (decayEndTimeStamp - dispatchTimestamp)
+                                END, 
+                                0
+                            ) * (CAST(bid AS NUMERIC) / POWER(10, 18)) AS decayed_bid_eth
+                        FROM commitments_intermediate
+                    )
+                SELECT 
+                    *
+                FROM commitments_final
                 WITH NO DATA;
                 """
                 cur.execute(query)
 
-                # Create a more comprehensive unique index
+                # Create a unique index
                 cur.execute("""
                     CREATE UNIQUE INDEX preconf_txs_unique_idx 
                     ON api.preconf_txs(commitmentIndex, hash);
                 """)
 
-                # Now populate the view
+                # Populate the view
                 cur.execute("REFRESH MATERIALIZED VIEW api.preconf_txs;")
 
                 logger.info(
