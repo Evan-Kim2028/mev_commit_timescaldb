@@ -7,7 +7,7 @@ import polars as pl
 from hypermanager.manager import HyperManager
 from dotenv import load_dotenv
 from pipeline.queries import fetch_txs
-from pipeline.db import create_connection, write_events_to_timescale, get_max_block_number
+from pipeline.db import DatabaseConnection, write_events_to_timescale, get_max_block_number
 
 # Configure logging
 logging.basicConfig(
@@ -39,22 +39,23 @@ async def get_manager():
         await manager.close()
 
 
-def get_transaction_hashes(conn) -> list[str]:
+def get_transaction_hashes(db: DatabaseConnection) -> list[str]:
     """
     Query OpenedCommitmentStored table for transaction hashes after the last processed block
     """
     try:
+        conn = db.get_connection()
         max_block = get_max_block_number(conn, "l1transactions")
         print(f'max block number: {max_block}')
-        cursor = conn.cursor()
-        query = """
-            SELECT txnhash
-            FROM openedcommitmentstored
-            WHERE blocknumber > %s
-        """
-        cursor.execute(query, (max_block,))
-        results = cursor.fetchall()
-        cursor.close()
+        
+        with conn.cursor() as cursor:
+            query = """
+                SELECT txnhash
+                FROM openedcommitmentstored
+                WHERE blocknumber > %s
+            """
+            cursor.execute(query, (max_block,))
+            results = cursor.fetchall()
 
         return [row[0] for row in results] if results else []
     except Exception as e:
@@ -62,7 +63,7 @@ def get_transaction_hashes(conn) -> list[str]:
         return []
 
 
-async def process_l1_transactions(conn, tx_hashes: list[str]):
+async def process_l1_transactions(db: DatabaseConnection, tx_hashes: list[str]):
     """
     Process L1 transactions and write to TimescaleDB
     """
@@ -80,6 +81,7 @@ async def process_l1_transactions(conn, tx_hashes: list[str]):
             logger.info(f"Fetched {len(df)} L1 transactions")
 
             # Write to TimescaleDB
+            conn = db.get_connection()
             write_events_to_timescale(conn, df, "l1transactions")
             logger.info("Successfully wrote L1 transactions to database")
         else:
@@ -95,23 +97,22 @@ async def main():
     """
     logger.info("Starting L1 transactions TimescaleDB pipeline")
 
-    conn = None
+    db = None
     try:
         # Create database connection
-        conn = create_connection(DB_PARAMS)
-
+        db = DatabaseConnection(DB_PARAMS)
+        
         async with get_manager():
             while True:
                 logger.info("Starting new fetch cycle")
 
                 # 1. Get transaction hashes from OpenedCommitmentStored
-                tx_hashes = get_transaction_hashes(conn)
+                tx_hashes = get_transaction_hashes(db)
 
                 # 2. Process and store L1 transactions
-                await process_l1_transactions(conn, tx_hashes)
+                await process_l1_transactions(db, tx_hashes)
 
-                logger.info(
-                    "Completed fetch cycle, waiting for next iteration")
+                logger.info("Completed fetch cycle, waiting for next iteration")
                 await asyncio.sleep(30)
 
     except KeyboardInterrupt:
@@ -119,8 +120,8 @@ async def main():
     except Exception as e:
         logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
     finally:
-        if conn:
-            conn.close()
+        if db:
+            db.close()
             logger.info("Database connection closed")
 
 if __name__ == "__main__":
