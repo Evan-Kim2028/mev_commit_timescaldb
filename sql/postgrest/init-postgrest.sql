@@ -19,3 +19,5 @@ GRANT SELECT ON ALL TABLES IN SCHEMA api TO anon;
 
 -- Grant select on all FUTURE tables in api schema to anon
 ALTER DEFAULT PRIVILEGES IN SCHEMA api GRANT SELECT ON TABLES TO anon;
+
+GRANT anon TO postgres;
