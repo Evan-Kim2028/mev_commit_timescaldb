@@ -43,3 +43,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT ALL ON TABLES TO postgres;
 ALTER DEFAULT PRIVILEGES IN SCHEMA api 
     GRANT ALL ON TABLES TO postgres;
+
+-- Grant permissions for materialized views specifically
+GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA api TO anon;
+
+-- Set default privileges for future materialized views
+ALTER DEFAULT PRIVILEGES IN SCHEMA api 
+    GRANT SELECT ON MATERIALIZED VIEWS TO anon;
