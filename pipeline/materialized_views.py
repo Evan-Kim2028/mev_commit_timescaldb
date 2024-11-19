@@ -84,10 +84,9 @@ class MaterializedViewManager:
                 cur.execute(
                     "DROP MATERIALIZED VIEW IF EXISTS api.preconf_txs CASCADE;")
 
-                # Corrected view creation query for continuous aggregates
+                # Corrected view creation query without TimescaleDB option
                 query = """
-                CREATE MATERIALIZED VIEW api.preconf_txs 
-                WITH (timescaledb.continuous) AS
+                CREATE MATERIALIZED VIEW api.preconf_txs AS
                 WITH 
                     encrypted_stores AS (
                         SELECT commitmentIndex, committer, commitmentDigest 
@@ -147,7 +146,8 @@ class MaterializedViewManager:
                     )
                 SELECT 
                     *
-                FROM commitments_final;
+                FROM commitments_final
+                WITH NO DATA;
                 """
                 cur.execute(query)
 
@@ -157,15 +157,15 @@ class MaterializedViewManager:
                     ON api.preconf_txs(commitmentIndex, hash);
                 """)
 
-                # No need to manually refresh; TimescaleDB handles it for continuous aggregates
+                # Populate the view
+                cur.execute("REFRESH MATERIALIZED VIEW api.preconf_txs;")
 
                 logger.info(
-                    "Successfully created preconf_txs continuous aggregate view")
+                    "Successfully created preconf_txs materialized view")
                 return True
 
         except Exception as e:
-            logger.error(
-                f"Error creating preconf_txs materialized view: {e}")
+            logger.error(f"Error creating preconf_txs materialized view: {e}")
             return False
         finally:
             if self.conn.autocommit:
