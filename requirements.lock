@@ -10,9 +10,9 @@
 #   universal: false
 
 -e file:.
-hypermanager==0.1.9
+hypermanager==0.1.10
 hypersync==0.8.3
-polars==1.12.0
+polars==1.14.0
 psycopg==3.2.3
 pyarrow==18.0.0
 python-dotenv==1.0.1
