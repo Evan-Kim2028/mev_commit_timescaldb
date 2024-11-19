@@ -1,6 +1,7 @@
 import polars as pl
 import psycopg
 from typing import Dict, Tuple
+from contextlib import contextmanager
 
 
 RESERVED_KEYWORDS = {
@@ -27,12 +28,43 @@ def normalize_table_name(table_name: str) -> str:
     return table_name.lower().strip()
 
 
-def create_connection(db_params: dict) -> psycopg.Connection:
-    try:
-        return psycopg.connect(**db_params)
-    except psycopg.Error as e:
-        print(f"Error connecting to database: {e}")
-        raise
+class DatabaseConnection:
+    def __init__(self, db_params):
+        self.db_params = db_params
+        self.conn = None
+
+    def connect(self):
+        if not self.conn or self.conn.closed:
+            self.conn = psycopg.connect(**self.db_params)
+        return self.conn
+
+    def get_connection(self):
+        return self.connect()
+
+    def close(self):
+        if self.conn and not self.conn.closed:
+            self.conn.close()
+
+    @contextmanager
+    def transaction(self):
+        """Context manager for transactions"""
+        try:
+            yield self.conn
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    @contextmanager
+    def autocommit(self):
+        """Context manager for autocommit operations"""
+        original_autocommit = self.conn.autocommit
+        try:
+            self.conn.commit()  # Commit any existing transaction
+            self.conn.autocommit = True
+            yield self.conn
+        finally:
+            self.conn.autocommit = original_autocommit
 
 
 def escape_column_name(name: str) -> str:

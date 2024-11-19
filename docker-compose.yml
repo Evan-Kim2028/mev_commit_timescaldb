@@ -22,23 +22,6 @@ services:
       - .env
     restart: unless-stopped
 
-  refresh_scheduler:
-    image: postgres:15-alpine
-    container_name: refresh_scheduler
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-    volumes:
-      - ./sql:/sql
-    environment:
-      - PGPASSWORD=${DB_PASSWORD}
-      - DB_HOST=timescaledb
-      - DB_PORT=${DB_PORT}
-      - DB_USER=${DB_USER}
-      - DB_NAME=${DB_NAME}
-      - DB_PASSWORD=${DB_PASSWORD}
-    entrypoint: [ "/sql/refresh_scheduler/refresh_materialized_views.sh" ]
-
   postgrest:
     image: postgrest/postgrest:latest
     container_name: postgrest
