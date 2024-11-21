@@ -1,8 +1,7 @@
 import polars as pl
 import psycopg
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 from contextlib import contextmanager
-
 
 RESERVED_KEYWORDS = {
     'window', 'user', 'order', 'group', 'default', 'check', 'index',
@@ -76,15 +75,25 @@ def escape_column_name(name: str) -> str:
     return name
 
 
+def get_primary_key_columns(table_name: str) -> List[str]:
+    """
+    Return primary key columns based on the table name.
+    """
+    if table_name in ['staked', 'staked_old']:
+        return ['block_number', 'valblspubkey']
+    else:
+        return ['block_number', 'hash']
+
+
 def convert_schema_to_timescale(schema: Dict[str, pl.DataType]) -> list[Tuple[str, str]]:
     """
     Convert Polars schema to TimescaleDB column definitions.
     """
     def get_timescale_type(name: str, pl_dtype: pl.DataType) -> str:
-        # Special handling for block_number
         if name.lower() == 'block_number':
             return "BIGINT"
-
+        elif name.lower() in ['hash', 'valblspubkey']:
+            return "TEXT"
         if isinstance(pl_dtype, pl.Datetime):
             return "TIMESTAMPTZ"
         elif isinstance(pl_dtype, pl.Int64):
@@ -109,6 +118,16 @@ def create_or_update_event_table(conn: psycopg.Connection, table_name: str, df: 
     table_name = normalize_table_name(table_name)
     schema_columns = convert_schema_to_timescale(df.schema)
 
+    primary_key_columns = get_primary_key_columns(table_name)
+    missing_columns = [
+        col for col in primary_key_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required primary key columns {
+                         missing_columns} in table {table_name}")
+
+    primary_key = ', '.join(escape_column_name(col)
+                            for col in primary_key_columns)
+
     with conn.cursor() as cur:
         try:
             # Check if table exists
@@ -126,7 +145,7 @@ def create_or_update_event_table(conn: psycopg.Connection, table_name: str, df: 
                 create_query = f"""
                     CREATE TABLE {table_name} (
                         {', '.join(columns)},
-                        PRIMARY KEY (block_number)
+                        PRIMARY KEY ({primary_key})
                     )
                 """
                 cur.execute(create_query)
@@ -156,10 +175,7 @@ def create_or_update_event_table(conn: psycopg.Connection, table_name: str, df: 
                     if clean_name not in existing_columns:
                         cur.execute(f"ALTER TABLE {
                                     table_name} ADD COLUMN {name} {dtype}")
-                    # Optionally, you could check if the data type matches and alter if needed
-                    # else:
-                    #     if existing_columns[clean_name].upper() != dtype.upper():
-                    #         cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {name} TYPE {dtype}")
+                    # Optionally, check if the data type matches and alter if needed
 
             conn.commit()
         except Exception as e:
@@ -216,16 +232,35 @@ def write_events_to_timescale(conn: psycopg.Connection, df: pl.DataFrame, table_
         # Normalize column names in the DataFrame
         df = df.rename({col: normalize_column_name(col) for col in df.columns})
 
-        # Ensure block_number is the correct type before creating/updating table
-        if 'block_number' in df.columns:
-            df = df.with_columns(pl.col('block_number').cast(pl.Int64))
+        # Ensure required columns are correctly typed
+        # First, ensure block_number is Int64
+        df = df.with_columns(pl.col('block_number').cast(pl.Int64))
+
+        # Get primary key columns
+        primary_key_columns = get_primary_key_columns(table_name)
+
+        # Ensure primary key columns are present
+        missing_columns = [
+            col for col in primary_key_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required primary key columns {
+                             missing_columns} in table {table_name}")
+
+        # Cast primary key columns to appropriate types
+        for col in primary_key_columns:
+            if col == 'block_number':
+                df = df.with_columns(pl.col('block_number').cast(pl.Int64))
+            elif col == 'hash':
+                df = df.with_columns(pl.col('hash').cast(pl.Utf8))
+            elif col == 'valblspubkey':
+                df = df.with_columns(pl.col('valblspubkey').cast(pl.Utf8))
 
         create_or_update_event_table(conn, table_name, df)
 
         # Convert UInt64 columns to strings to handle large numbers
         schema = df.schema
         uint64_cols = [name for name, dtype in schema.items()
-                       if isinstance(dtype, pl.UInt64) and name.lower() != 'block_number']
+                       if isinstance(dtype, pl.UInt64) and name.lower() not in primary_key_columns]
 
         if uint64_cols:
             df = df.with_columns([
@@ -239,12 +274,15 @@ def write_events_to_timescale(conn: psycopg.Connection, df: pl.DataFrame, table_
         # Convert DataFrame to records
         records = [tuple(row) for row in df.rows()]
 
+        conflict_columns = ', '.join(escape_column_name(col)
+                                     for col in primary_key_columns)
+
         with conn.cursor() as cur:
             cur.executemany(f"""
                 INSERT INTO {table_name}
                 ({', '.join(columns)})
                 VALUES ({placeholders})
-                ON CONFLICT (block_number) DO NOTHING
+                ON CONFLICT ({conflict_columns}) DO NOTHING
             """, records)
             conn.commit()
     except Exception as e:

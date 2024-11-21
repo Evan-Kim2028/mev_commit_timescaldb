@@ -10,7 +10,7 @@
 #   universal: false
 
 -e file:.
-hypermanager==0.1.10
+hypermanager==0.1.12
 hypersync==0.8.3
 polars==1.14.0
 psycopg==3.2.3

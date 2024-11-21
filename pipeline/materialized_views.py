@@ -9,28 +9,39 @@ class MaterializedViewManager:
         self.conn = conn
 
     def check_tables_exist(self) -> bool:
-        """Check if all required tables exist."""
+        """Check if all required tables and views exist."""
         required_tables = [
             'unopenedcommitmentstored',
-            'openedcommitmentstored',
             'commitmentprocessed',
             'l1transactions'
         ]
-
         try:
             with self.conn.cursor() as cur:
+                # Check tables
                 for table in required_tables:
                     cur.execute("""
                         SELECT EXISTS (
                             SELECT FROM information_schema.tables 
-                            WHERE table_schema = 'public' 
-                            AND table_name = %s
+                            WHERE table_schema = 'public' AND table_name = %s
                         )
                     """, (table,))
                     if not cur.fetchone()[0]:
                         logger.info(f"Table {table} does not exist yet")
                         return False
-            return True
+
+                # Check for the view specifically
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.views 
+                        WHERE table_schema = 'public' AND table_name = 'openedcommitmentstoredall'
+                    )
+                """)
+                if not cur.fetchone()[0]:
+                    logger.info(
+                        "View openedcommitmentstoredall does not exist yet")
+                    return False
+
+                return True
         except Exception as e:
             logger.error(f"Error checking tables: {e}")
             return False
@@ -93,7 +104,7 @@ class MaterializedViewManager:
                         FROM public.unopenedcommitmentstored
                     ),
                     commit_stores AS (
-                        SELECT * FROM public.openedcommitmentstored
+                        SELECT * FROM public.openedcommitmentstoredall
                     ),
                     commits_processed AS (
                         SELECT commitmentIndex, isSlash 
@@ -171,8 +182,8 @@ class MaterializedViewManager:
             if self.conn.autocommit:
                 self.conn.autocommit = False
 
-    def refresh_materialized_views(self) -> None:
-        """Refresh all materialized views."""
+    def refresh_preconf_txs_view(self) -> None:
+        """Refresh the preconf_txs materialized view."""
         try:
             with self.conn.cursor() as cur:
                 # First check if view and index exist
@@ -202,3 +213,197 @@ class MaterializedViewManager:
 
         except Exception as e:
             logger.error(f"Error refreshing materialized views: {e}")
+
+    def refresh_openedcommitments_view(self) -> None:
+        """Refresh the openedcommitmentstoredall materialized view."""
+        try:
+            with self.conn.cursor() as cur:
+                # Check if materialized view exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM pg_matviews 
+                        WHERE schemaname = 'public' 
+                        AND matviewname = 'openedcommitmentstoredall'
+                    )
+                """)
+                view_exists = cur.fetchone()[0]
+
+                if view_exists:
+                    # Ensure we're in autocommit mode for concurrent refresh
+                    old_autocommit = self.conn.autocommit
+                    self.conn.autocommit = True
+                    try:
+                        cur.execute(
+                            "REFRESH MATERIALIZED VIEW CONCURRENTLY openedcommitmentstoredall;")
+                        logger.info(
+                            "Successfully refreshed openedcommitmentstoredall materialized view")
+                    finally:
+                        self.conn.autocommit = old_autocommit
+                else:
+                    logger.info(
+                        "openedcommitmentstoredall materialized view doesn't exist yet, skipping refresh")
+
+        except Exception as e:
+            logger.error(
+                f"Error refreshing openedcommitmentstoredall materialized view: {e}")
+
+    def refresh_all_views(self) -> None:
+        """Refresh all views and materialized views."""
+        try:
+            # First refresh the consolidated view
+            self.refresh_openedcommitments_view()
+
+            # Then refresh the materialized view that depends on it
+            self.refresh_preconf_txs_view()
+
+        except Exception as e:
+            logger.error(f"Error refreshing views: {e}")
+
+    def create_openedcommitments_consolidated_view(self) -> bool:
+        """Create a consolidated materialized view for opened commitments combining both table versions."""
+        try:
+            # Check if both required tables exist
+            with self.conn.cursor() as cur:
+                for table in ['openedcommitmentstored', 'openedcommitmentstoredv2']:
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_schema = 'public' 
+                            AND table_name = %s
+                        )
+                    """, (table,))
+                    if not cur.fetchone()[0]:
+                        logger.info(f"Table {table} does not exist yet")
+                        return False
+
+            self.conn.autocommit = True
+            with self.conn.cursor() as cur:
+                # Check if materialized view already exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM pg_matviews 
+                        WHERE schemaname = 'public' 
+                        AND matviewname = 'openedcommitmentstoredall'
+                    )
+                """)
+                view_exists = cur.fetchone()[0]
+
+                if view_exists:
+                    cur.execute(
+                        "DROP MATERIALIZED VIEW IF EXISTS openedcommitmentstoredall CASCADE;")
+
+                # Create the consolidated materialized view with DISTINCT ON
+                query = """
+                    CREATE MATERIALIZED VIEW openedcommitmentstoredall AS
+                    SELECT DISTINCT ON (commitmentIndex, txnHash)
+                        commitmentIndex,
+                        txnHash,
+                        blocknumber,
+                        bidder,
+                        bid,
+                        decayStartTimeStamp,
+                        decayEndTimeStamp,
+                        dispatchTimestamp
+                    FROM (
+                        SELECT 
+                            commitmentIndex,
+                            txnHash,
+                            blocknumber,
+                            bidder,
+                            bidamt as bid,
+                            decayStartTimeStamp,
+                            decayEndTimeStamp,
+                            dispatchTimestamp
+                        FROM openedcommitmentstoredv2
+                        UNION ALL
+                        SELECT 
+                            commitmentIndex,
+                            txnHash,
+                            blocknumber,
+                            bidder,
+                            bid,
+                            decayStartTimeStamp,
+                            decayEndTimeStamp,
+                            dispatchTimestamp
+                        FROM openedcommitmentstored
+                    ) combined
+                    ORDER BY commitmentIndex, txnHash, blocknumber DESC;
+                """
+                cur.execute(query)
+
+                # Create the unique index
+                cur.execute("""
+                    CREATE UNIQUE INDEX openedcommitmentstoredall_unique_idx 
+                    ON openedcommitmentstoredall(commitmentIndex, blocknumber);
+                """)
+
+                # Initial refresh of the materialized view
+                cur.execute("REFRESH MATERIALIZED VIEW openedcommitmentstoredall;")
+
+                logger.info(
+                    "Successfully created openedcommitmentstoredall materialized view")
+                return True
+
+        except Exception as e:
+            logger.error(f"Error creating openedcommitmentstoredall materialized view: {e}")
+            return False
+        finally:
+            if self.conn.autocommit:
+                self.conn.autocommit = False
+
+    def merge_staked_columns(self) -> None:
+        """Merge txoriginator from staked_old into msgsender in staked based on valblspubkey."""
+        try:
+            with self.conn.cursor() as cur:
+                # Check if the staked and staked_old tables exist
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'staked'
+                    )
+                """)
+                staked_exists = cur.fetchone()[0]
+
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'staked_old'
+                    )
+                """)
+                staked_old_exists = cur.fetchone()[0]
+
+                if not staked_exists or not staked_old_exists:
+                    logger.info("staked or staked_old table does not exist.")
+                    return
+
+                # Check if there are any rows to update
+                check_query = """
+                SELECT COUNT(*) FROM staked
+                JOIN staked_old ON staked.valblspubkey = staked_old.valblspubkey
+                WHERE staked.msgsender <> staked_old.txoriginator
+                  AND staked_old.txoriginator IS NOT NULL;
+                """
+                cur.execute(check_query)
+                count = cur.fetchone()[0]
+
+                if count > 0:
+                    # Run the UPDATE query
+                    update_query = """
+                    UPDATE staked
+                    SET msgsender = staked_old.txoriginator
+                    FROM staked_old
+                    WHERE staked.valblspubkey = staked_old.valblspubkey
+                      AND staked_old.txoriginator IS NOT NULL
+                      AND staked.msgsender <> staked_old.txoriginator;
+                    """
+                    cur.execute(update_query)
+                    self.conn.commit()
+                    logger.info(
+                        f"Successfully merged staked tables, updated {count} rows.")
+                else:
+                    logger.info("No staked data to merge.")
+        except Exception as e:
+            logger.error(f"Error merging staked tables: {e}")
+            self.conn.rollback()

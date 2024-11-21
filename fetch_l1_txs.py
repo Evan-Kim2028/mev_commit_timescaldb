@@ -8,6 +8,7 @@ from hypermanager.manager import HyperManager
 from dotenv import load_dotenv
 from pipeline.queries import fetch_txs
 from pipeline.db import DatabaseConnection, write_events_to_timescale, get_max_block_number
+import psycopg  # Import psycopg to access specific exceptions
 
 # Configure logging
 logging.basicConfig(
@@ -47,17 +48,21 @@ def get_transaction_hashes(db: DatabaseConnection) -> list[str]:
         conn = db.get_connection()
         max_block = get_max_block_number(conn, "l1transactions")
         print(f'max block number: {max_block}')
-        
+
         with conn.cursor() as cursor:
             query = """
                 SELECT txnhash
-                FROM openedcommitmentstored
+                FROM openedcommitmentstoredall
                 WHERE blocknumber > %s
             """
             cursor.execute(query, (max_block,))
             results = cursor.fetchall()
 
         return [row[0] for row in results] if results else []
+    except psycopg.errors.UndefinedTable as e:
+        logger.warning(
+            f"Table 'openedcommitmentstoredall' does not exist yet: {e}")
+        return []
     except Exception as e:
         logger.error(f"Error fetching transaction hashes: {e}", exc_info=True)
         return []
@@ -101,7 +106,7 @@ async def main():
     try:
         # Create database connection
         db = DatabaseConnection(DB_PARAMS)
-        
+
         async with get_manager():
             while True:
                 logger.info("Starting new fetch cycle")
@@ -112,7 +117,8 @@ async def main():
                 # 2. Process and store L1 transactions
                 await process_l1_transactions(db, tx_hashes)
 
-                logger.info("Completed fetch cycle, waiting for next iteration")
+                logger.info(
+                    "Completed fetch cycle, waiting for next iteration")
                 await asyncio.sleep(30)
 
     except KeyboardInterrupt:

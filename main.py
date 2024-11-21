@@ -4,7 +4,7 @@ import logging
 import os
 import polars as pl
 from hypermanager.manager import HyperManager
-from hypermanager.protocols.mev_commit import mev_commit_config
+from hypermanager.protocols.mev_commit import mev_commit_config, mev_commit_validator_config
 from dotenv import load_dotenv
 
 from pipeline.db import write_events_to_timescale, get_max_block_number, DatabaseConnection
@@ -32,13 +32,13 @@ DB_PARAMS = {
 
 
 @asynccontextmanager
-async def get_manager():
+async def get_manager(endpoint: str = "https://mev-commit.hypersync.xyz"):
     """Context manager for HyperManager"""
-    manager = HyperManager("https://mev-commit.hypersync.xyz")
+    manager = HyperManager(endpoint)
     try:
         yield manager
     finally:
-        await manager.close()  # Add close method if available
+        pass
 
 
 async def process_event_config(conn, manager, config, start_block: int = 0):
@@ -95,24 +95,42 @@ async def main():
             conn = db.get_connection()
             view_manager = MaterializedViewManager(conn)
 
-            # Initialize materialized views
+            # # Merge staked tables
             with db.autocommit():
-                if not view_manager.create_preconf_txs_view():
-                    logger.error(
-                        "Failed to create preconf_txs materialized view")
-                    return
+                view_manager.merge_staked_columns()
 
-            async with get_manager() as manager:
+            # First create the consolidated view
+            with db.autocommit():
+                if not view_manager.create_openedcommitments_consolidated_view():
+                    logger.warning("Failed to create openedcommitments consolidated view - will retry in next iteration")
+                
+                # Then try to create the materialized view
+                if not view_manager.create_preconf_txs_view():
+                    logger.warning("Failed to create preconf_txs materialized view - will retry in next iteration")
+
+            async with get_manager("https://mev-commit.hypersync.xyz") as mev_commit_manager, \
+                    get_manager("https://holesky.hypersync.xyz") as holesky_manager:
                 while True:
                     logger.info("Starting new fetch cycle")
                     try:
                         # Process events in transaction mode
                         with db.transaction():
-                            await process_batch(conn, manager, mev_commit_config.values())
+                            await process_batch(
+                                conn,
+                                mev_commit_manager,
+                                list(mev_commit_config.values())
+                            )
+
+                            # Process validator events
+                            await process_batch(
+                                conn,
+                                holesky_manager,
+                                list(mev_commit_validator_config.values())
+                            )
 
                         # Refresh views in autocommit mode
                         with db.autocommit():
-                            view_manager.refresh_materialized_views()
+                            view_manager.refresh_all_views()
 
                         # Reset retry count on successful iteration
                         retry_count = 0
