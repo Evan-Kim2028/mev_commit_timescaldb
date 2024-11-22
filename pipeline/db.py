@@ -31,6 +31,7 @@ class DatabaseConnection:
     def __init__(self, db_params):
         self.db_params = db_params
         self.conn = None
+        self.connect()
 
     def connect(self):
         if not self.conn or self.conn.closed:
@@ -57,13 +58,18 @@ class DatabaseConnection:
     @contextmanager
     def autocommit(self):
         """Context manager for autocommit operations"""
+        if self.conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
+            self.conn.commit()  # Commit any pending transaction
+            
         original_autocommit = self.conn.autocommit
         try:
-            self.conn.commit()  # Commit any existing transaction
             self.conn.autocommit = True
             yield self.conn
         finally:
-            self.conn.autocommit = original_autocommit
+            if not self.conn.closed:
+                if self.conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
+                    self.conn.commit()
+                self.conn.autocommit = original_autocommit
 
 
 def escape_column_name(name: str) -> str:

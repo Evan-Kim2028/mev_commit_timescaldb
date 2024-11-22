@@ -6,6 +6,7 @@ import polars as pl
 from hypermanager.manager import HyperManager
 from hypermanager.protocols.mev_commit import mev_commit_config, mev_commit_validator_config
 from dotenv import load_dotenv
+import psycopg
 
 from pipeline.db import write_events_to_timescale, get_max_block_number, DatabaseConnection
 from pipeline.queries import fetch_event_for_config
@@ -83,7 +84,6 @@ async def process_batch(conn, manager, configs):
 async def main():
     """Main function to continuously fetch and store event data"""
     logger.info("Starting TimescaleDB pipeline")
-
     retry_count = 0
     max_retries = 3
     retry_delay = 5  # seconds
@@ -95,18 +95,27 @@ async def main():
             conn = db.get_connection()
             view_manager = MaterializedViewManager(conn)
 
-            # # Merge staked tables
             with db.autocommit():
                 view_manager.merge_staked_columns()
 
-            # First create the consolidated view
-            with db.autocommit():
-                if not view_manager.create_openedcommitments_consolidated_view():
-                    logger.warning("Failed to create openedcommitments consolidated view - will retry in next iteration")
-                
-                # Then try to create the materialized view
-                if not view_manager.create_preconf_txs_view():
-                    logger.warning("Failed to create preconf_txs materialized view - will retry in next iteration")
+                # Create the consolidated view with explicit creation
+                try:
+                    if not view_manager.create_openedcommitments_consolidated_view():
+                        logger.warning(
+                            "Failed to create openedcommitments consolidated view - will retry in next iteration")
+                    else:
+                        logger.info(
+                            "Successfully created or verified openedcommitments consolidated view")
+
+                    # Create the materialized view with explicit creation
+                    if not view_manager.create_preconf_txs_view():
+                        logger.warning(
+                            "Failed to create preconf_txs materialized view - will retry in next iteration")
+                    else:
+                        logger.info(
+                            "Successfully created or verified preconf_txs materialized view")
+                except Exception as e:
+                    logger.error(f"Error creating views: {str(e)}")
 
             async with get_manager("https://mev-commit.hypersync.xyz") as mev_commit_manager, \
                     get_manager("https://holesky.hypersync.xyz") as holesky_manager:
@@ -128,7 +137,9 @@ async def main():
                                 list(mev_commit_validator_config.values())
                             )
 
-                        # Refresh views in autocommit mode
+                        # Refresh views in autocommit mode - ensure clean state first
+                        if conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
+                            conn.commit()
                         with db.autocommit():
                             view_manager.refresh_all_views()
 
@@ -138,6 +149,8 @@ async def main():
                     except Exception as e:
                         logger.error(f"Cycle error: {str(e)}", exc_info=True)
                         # Don't exit the main loop for individual cycle errors
+                        if conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
+                            conn.rollback()
 
                     logger.info(
                         "Completed fetch cycle, waiting for next iteration")
@@ -147,14 +160,12 @@ async def main():
             retry_count += 1
             logger.error(f"Main loop error (attempt {retry_count}/{max_retries}): {str(e)}",
                          exc_info=True)
-
             if retry_count < max_retries:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
             else:
                 logger.error("Max retries reached, exiting...")
                 break
-
         finally:
             if db:
                 try:

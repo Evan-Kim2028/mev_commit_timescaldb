@@ -1,5 +1,6 @@
 import psycopg
 import logging
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -338,14 +339,16 @@ class MaterializedViewManager:
                 """)
 
                 # Initial refresh of the materialized view
-                cur.execute("REFRESH MATERIALIZED VIEW openedcommitmentstoredall;")
+                cur.execute(
+                    "REFRESH MATERIALIZED VIEW openedcommitmentstoredall;")
 
                 logger.info(
                     "Successfully created openedcommitmentstoredall materialized view")
                 return True
 
         except Exception as e:
-            logger.error(f"Error creating openedcommitmentstoredall materialized view: {e}")
+            logger.error(
+                f"Error creating openedcommitmentstoredall materialized view: {e}")
             return False
         finally:
             if self.conn.autocommit:
@@ -407,3 +410,18 @@ class MaterializedViewManager:
         except Exception as e:
             logger.error(f"Error merging staked tables: {e}")
             self.conn.rollback()
+
+    @contextmanager
+    def autocommit(self):
+        """Context manager for autocommit operations"""
+        if self.conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
+            self.conn.commit()  # Commit any pending transaction
+        original_autocommit = self.conn.autocommit
+        try:
+            self.conn.autocommit = True
+            yield self.conn
+        finally:
+            if not self.conn.closed:
+                if self.conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
+                    self.conn.commit()
+                self.conn.autocommit = original_autocommit
