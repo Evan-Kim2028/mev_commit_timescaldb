@@ -21,3 +21,14 @@ GRANT SELECT ON ALL TABLES IN SCHEMA api TO anon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA api GRANT SELECT ON TABLES TO anon;
 
 GRANT anon TO postgres;
+
+-- Grant specific permissions for materialized view operations
+GRANT CREATE ON SCHEMA api TO postgres;
+GRANT ALL ON ALL MATERIALIZED VIEWS IN SCHEMA api TO postgres;
+
+-- Ensure postgres can create and refresh materialized views
+ALTER DEFAULT PRIVILEGES IN SCHEMA api 
+    GRANT ALL ON MATERIALIZED VIEWS TO postgres;
+
+-- Allow postgres to create indexes
+GRANT ALL ON ALL SEQUENCES IN SCHEMA api TO postgres;
