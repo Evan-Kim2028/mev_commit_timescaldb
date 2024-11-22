@@ -57,6 +57,13 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_HOST=mev_timescaledb
       - DB_PORT=${DB_PORT}
+      - PYTHONUNBUFFERED=1
+    tty: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
     restart: unless-stopped
 
 volumes:

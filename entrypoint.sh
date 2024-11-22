@@ -3,30 +3,23 @@
 # Activate the virtual environment
 source /app/.venv/bin/activate
 
-# Function to run Python scripts
+# Function to run Python scripts with unbuffered output
 run_scripts() {
     echo "Running main.py..."
-    python main.py &
+    # Use python -u for unbuffered output
+    PYTHONUNBUFFERED=1 python -u main.py &
     MAIN_PID=$!
 
     echo "Running fetch_l1_txs.py..."
-    python fetch_l1_txs.py &
+    PYTHONUNBUFFERED=1 python -u fetch_l1_txs.py &
     FETCH_PID=$!
 
-    # Wait for both processes
-    wait $MAIN_PID
-    wait $FETCH_PID
+    # Wait for both processes and forward their signals
+    wait $MAIN_PID $FETCH_PID
 }
 
 # Trap SIGTERM and kill child processes
 trap 'kill $(jobs -p)' SIGTERM
 
-# Initial run
+# Run the scripts
 run_scripts
-
-# Loop to run the scripts every 30 seconds
-while true; do
-    echo "Waiting for 30 seconds before the next run..."
-    sleep 30
-    run_scripts
-done
