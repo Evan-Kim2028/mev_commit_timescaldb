@@ -30,16 +30,17 @@ class MaterializedViewManager:
                         logger.info(f"Table {table} does not exist yet")
                         return False
 
-                # Check for the view specifically
+                # Check for materialized view specifically
                 cur.execute("""
                     SELECT EXISTS (
-                        SELECT FROM information_schema.views 
-                        WHERE table_schema = 'public' AND table_name = 'openedcommitmentstoredall'
+                        SELECT FROM pg_matviews 
+                        WHERE schemaname = 'public' 
+                        AND matviewname = 'openedcommitmentstoredall'
                     )
                 """)
                 if not cur.fetchone()[0]:
                     logger.info(
-                        "View openedcommitmentstoredall does not exist yet")
+                        "Materialized view openedcommitmentstoredall does not exist yet")
                     return False
 
                 return True
