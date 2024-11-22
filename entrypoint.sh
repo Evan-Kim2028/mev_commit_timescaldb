@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Activate the virtual environment
 source /app/.venv/bin/activate
@@ -7,11 +6,20 @@ source /app/.venv/bin/activate
 # Function to run Python scripts
 run_scripts() {
     echo "Running main.py..."
-    python main.py
+    python main.py &
+    MAIN_PID=$!
 
     echo "Running fetch_l1_txs.py..."
-    python fetch_l1_txs.py
+    python fetch_l1_txs.py &
+    FETCH_PID=$!
+
+    # Wait for both processes
+    wait $MAIN_PID
+    wait $FETCH_PID
 }
+
+# Trap SIGTERM and kill child processes
+trap 'kill $(jobs -p)' SIGTERM
 
 # Initial run
 run_scripts
