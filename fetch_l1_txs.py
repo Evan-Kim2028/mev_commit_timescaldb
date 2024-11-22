@@ -42,29 +42,55 @@ async def get_manager():
 
 def get_transaction_hashes(db: DatabaseConnection) -> list[str]:
     """
-    Query OpenedCommitmentStored table for transaction hashes after the last processed block
+    Query OpenedCommitmentStored table for transaction hashes after the last processed block.
+    Returns empty list if dependencies aren't ready yet.
     """
     try:
-        conn = db.get_connection()
-        max_block = get_max_block_number(conn, "l1transactions")
-        print(f'max block number: {max_block}')
+        with db.transaction():
+            conn = db.get_connection()
 
-        with conn.cursor() as cursor:
-            query = """
-                SELECT txnhash
-                FROM openedcommitmentstoredall
-                WHERE blocknumber > %s
-            """
-            cursor.execute(query, (max_block,))
-            results = cursor.fetchall()
+            # Get max block number, returns 0 if table doesn't exist
+            max_block = get_max_block_number(conn, "l1transactions")
+            logger.info(f'Current max block number: {max_block}')
 
-        return [row[0] for row in results] if results else []
-    except psycopg.errors.UndefinedTable as e:
-        logger.warning(
-            f"Table 'openedcommitmentstoredall' does not exist yet: {e}")
-        return []
+            with conn.cursor() as cursor:
+                # Check for materialized view without failing
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM pg_matviews 
+                        WHERE matviewname = 'openedcommitmentstoredall'
+                    )
+                """)
+                view_exists = cursor.fetchone()[0]
+
+                if not view_exists:
+                    logger.info(
+                        "Waiting for openedcommitmentstoredall materialized view to be created")
+                    return []
+
+                # Try to query the view
+                try:
+                    query = """
+                        SELECT txnhash
+                        FROM openedcommitmentstoredall
+                        WHERE blocknumber > %s
+                    """
+                    cursor.execute(query, (max_block,))
+                    results = cursor.fetchall()
+
+                    tx_hashes = [row[0] for row in results] if results else []
+                    if tx_hashes:
+                        logger.info(
+                            f"Found {len(tx_hashes)} new transactions to process")
+                    return tx_hashes
+
+                except Exception as view_error:
+                    logger.info(
+                        f"View query failed (will retry next iteration): {view_error}")
+                    return []
+
     except Exception as e:
-        logger.error(f"Error fetching transaction hashes: {e}", exc_info=True)
+        logger.info(f"Transaction hash fetch skipped (will retry): {e}")
         return []
 
 
