@@ -49,7 +49,13 @@ class MaterializedViewManager:
             return False
 
     def create_preconf_txs_view(self) -> bool:
+
         try:
+            if not self.verify_permissions():
+                logger.error(
+                    "Insufficient permissions to create materialized view")
+                return False
+
             if not self.check_tables_exist():
                 logger.info(
                     "Not all required tables exist yet. Skipping materialized view creation.")
@@ -426,3 +432,22 @@ class MaterializedViewManager:
                 if self.conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS:
                     self.conn.commit()
                 self.conn.autocommit = original_autocommit
+
+
+def verify_permissions(self) -> bool:
+    try:
+        with self.conn.cursor() as cur:
+            # Check schema creation permission
+            cur.execute("CREATE SCHEMA IF NOT EXISTS api;")
+
+            # Test materialized view creation permission
+            cur.execute("""
+                CREATE MATERIALIZED VIEW IF NOT EXISTS api.test_permissions 
+                AS SELECT 1 AS col WITH NO DATA
+            """)
+            cur.execute(
+                "DROP MATERIALIZED VIEW IF EXISTS api.test_permissions")
+            return True
+    except Exception as e:
+        logger.error(f"Insufficient permissions: {e}")
+        return False
